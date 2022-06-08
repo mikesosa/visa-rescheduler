@@ -218,6 +218,9 @@ const casAndConsulate = async (email, password, scheduleId, consulateDate, casDa
                     console.log("CAS time: ", casTime);
                     console.log("Consulate date: ", checkingDate);
                     console.log("Consulate time: ", consulateTime);
+                    sendNotification(
+                      `SUCCESS: ${email} - CAD: ${checkingCasDate.date} at ${casTime} - CONSULATE ${checkingDate.date} at ${consulateTime}`
+                    );
                   } else {
                     console.log(
                       `❌ ==> No CAS times available for ${checkingCasDate.date}`
