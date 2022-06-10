@@ -125,17 +125,22 @@ const rescheduler = async (email, password, currentDate, scheduleId) => {
 
     console.log(headers);
 
-    // await axios
-    //   .post(APPOINTMENT_URL, {
-    //     headers,
-    //     data: payload,
-    //   })
-    //   .then((res) => {
-    //     console.log("Reescheduled sent: ", res);
-    //   })
-    //   .catch((err) => {
-    //     console.log("Error at : ", err);
-    //   });
+    sendNotification("Rescheduling...");
+
+    await axios
+      .post(APPOINTMENT_URL, {
+        headers,
+        data: payload,
+      })
+      .then((res) => {
+        console.log("Rescheduled sent: ", res);
+        sendNotification("Rescheduled sent: " + res.data);
+      })
+      .catch((err) => {
+        console.log("Error at : ", err);
+        sendNotification("Error at: " + err);
+      });
+
     // r = requests.post(APPOINTMENT_URL, headers=headers, data=data)
     // if(r.text.find('Successfully Scheduled') != -1):
     //     msg = f"Rescheduled Successfully! {date} {time}"
