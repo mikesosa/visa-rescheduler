@@ -168,6 +168,7 @@ const rescheduler = async (email, password, currentDate, scheduleId) => {
         if (validDates.length) {
           console.log("Closer dates: ", validDates);
           const closestDate = validDates[0];
+          await sendNotification("VISA: Si hay fechas!");
           return handleReschedule(closestDate);
         } else {
           throw new Error("No available dates...");
