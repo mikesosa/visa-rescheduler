@@ -15,8 +15,8 @@ const rescheduler = async (email, password, currentDate, scheduleId) => {
   const TIME_URL = `https://ais.usvisa-info.com/${COUNTRY_CODE}/niv/schedule/${SCHEDULE_ID}/appointment/times/${DAYS_IN_COUNTRY}.json?date=::date::&appointments[expedite]=false`;
   const APPOINTMENT_URL = `https://ais.usvisa-info.com/${COUNTRY_CODE}/niv/schedule/${SCHEDULE_ID}/appointment`;
   const PUSH_URL = "https://api.pushover.net/1/messages.json";
-  const PUSH_TOKEN = "acz5fhqxtqxmsqb6eh7ip17wng733h";
-  const PUSH_USER = "u3avnicb6o63uexim1g5v86dqks8nz";
+  const PUSH_TOKEN = "akdhcemcyhgbv8xz7j6a8e582ct7ok";
+  const PUSH_USER = "u86nkp3b1y56opwrfzxwrznf8g5qjp";
   const MAX_RETRIES = 10;
 
   const driver = new Builder().forBrowser("chrome").build();
