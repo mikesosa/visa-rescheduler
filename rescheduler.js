@@ -15,7 +15,14 @@ const colors = {
   gray: "\x1b[90m",
 };
 
-const rescheduler = async (email, password, currentDate, scheduleId, facilityId = 25) => {
+const rescheduler = async (
+  email,
+  password,
+  currentDate,
+  scheduleId,
+  facilityId = 25,
+  notEarlierThan = null
+) => {
   const USERNAME = email;
   const PASSWORD = password;
   const SCHEDULE_ID = scheduleId;
@@ -23,6 +30,7 @@ const rescheduler = async (email, password, currentDate, scheduleId, facilityId 
   const COUNTRY_CODE = "es-co";
   const REGEX_CONTINUE = "//a[contains(text(),'Continuar')]";
   const FACILITY_ID = facilityId;
+  const NOT_EARLIER_THAN = notEarlierThan; // Minimum date - won't book before this
   const RETRY_INTERVAL_MS = 60000; // 1 minute
   const DATE_URL = `https://ais.usvisa-info.com/${COUNTRY_CODE}/niv/schedule/${SCHEDULE_ID}/appointment/days/${FACILITY_ID}.json?&consulate_id=${FACILITY_ID}&consulate_date=&consulate_time=&appointments[expedite]=false`;
   const LOGIN_URL = `https://ais.usvisa-info.com/${COUNTRY_CODE}/niv/users/sign_in`;
@@ -61,16 +69,31 @@ const rescheduler = async (email, password, currentDate, scheduleId, facilityId 
     }
   };
 
-  // Success sound - celebratory (rescheduled successfully)
+  // Success sound - EPIC CELEBRATION (rescheduled successfully!)
   const playSuccessSound = () => {
-    // Play Hero sound for big success
-    exec("afplay /System/Library/Sounds/Hero.aiff");
-    setTimeout(() => {
-      exec("afplay /System/Library/Sounds/Glass.aiff");
-    }, 500);
-    setTimeout(() => {
-      exec("afplay /System/Library/Sounds/Hero.aiff");
-    }, 1000);
+    // 🎉🎉🎉 WE DID IT!!! EPIC VICTORY SOUND!!! 🎉🎉🎉
+    console.log("\n");
+    console.log("  🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊");
+    console.log("  🎉                                                    🎉");
+    console.log("  🎉   ¡¡¡ CITA PROGRAMADA EXITOSAMENTE !!!             🎉");
+    console.log("  🎉                                                    🎉");
+    console.log("  🎉        YOU DID IT! VISA APPOINTMENT SECURED!       🎉");
+    console.log("  🎉                                                    🎉");
+    console.log("  🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊");
+    console.log("\n");
+
+    // Play epic victory symphony!
+    exec("afplay /System/Library/Sounds/Funk.aiff");
+    setTimeout(() => exec("afplay /System/Library/Sounds/Hero.aiff"), 300);
+    setTimeout(() => exec("afplay /System/Library/Sounds/Glass.aiff"), 600);
+    setTimeout(() => exec("afplay /System/Library/Sounds/Funk.aiff"), 900);
+    setTimeout(() => exec("afplay /System/Library/Sounds/Hero.aiff"), 1200);
+    setTimeout(() => exec("afplay /System/Library/Sounds/Glass.aiff"), 1500);
+    setTimeout(() => exec("afplay /System/Library/Sounds/Funk.aiff"), 1800);
+    setTimeout(() => exec("afplay /System/Library/Sounds/Hero.aiff"), 2100);
+    setTimeout(() => exec("afplay /System/Library/Sounds/Glass.aiff"), 2400);
+    setTimeout(() => exec("afplay /System/Library/Sounds/Hero.aiff"), 2700);
+    setTimeout(() => exec("afplay /System/Library/Sounds/Funk.aiff"), 3000);
   };
 
   // Error sound - low tones for failures
@@ -149,6 +172,10 @@ const rescheduler = async (email, password, currentDate, scheduleId, facilityId 
       logInfo(`Schedule ID: ${SCHEDULE_ID}`);
       logInfo(`Facility ID: ${FACILITY_ID}`);
       logInfo(`Current appointment: ${MY_SCHEDULE_DATE}`);
+      if (NOT_EARLIER_THAN) {
+        logInfo(`Not earlier than: ${NOT_EARLIER_THAN}`);
+        logInfo(`Looking for dates: ${NOT_EARLIER_THAN} to ${MY_SCHEDULE_DATE}`);
+      }
       logInfo(`Check interval: ${RETRY_INTERVAL_MS / 1000} seconds`);
       log("─".repeat(50));
 
@@ -211,8 +238,21 @@ const rescheduler = async (email, password, currentDate, scheduleId, facilityId 
 
   // Try to reschedule to one of the given dates (tries each until one works)
   const handleReschedule = async (validDates) => {
-    // Try up to 10 earlier dates (more chances since many will have no times)
-    const datesToTry = validDates.slice(0, 10);
+    // STRATEGY: Skip first date if possible (everyone races for it)
+    // Prefer 2nd or 3rd date for better success chance
+    let datesToTry = validDates.slice(0, 10);
+
+    if (datesToTry.length > 2) {
+      // If 3+ dates, try from 2nd date first, then circle back to 1st
+      logInfo("Multiple dates available - skipping first date (likely contested)");
+      const reordered = [...datesToTry.slice(1), datesToTry[0]];
+      datesToTry = reordered;
+    } else if (datesToTry.length === 2) {
+      // If 2 dates, try 2nd first then 1st
+      logInfo("Two dates available - trying second date first");
+      datesToTry = [datesToTry[1], datesToTry[0]];
+    }
+    // If only 1 date, use it as-is
 
     for (let i = 0; i < datesToTry.length; i++) {
       const date = datesToTry[i];
@@ -240,9 +280,19 @@ const rescheduler = async (email, password, currentDate, scheduleId, facilityId 
           continue; // Skip to next date immediately - no UI interaction needed!
         }
 
-        const availableTime = timesCheck.available_times[0];
+        // STRATEGY: Prefer 2nd or 3rd time slot (first is most contested)
+        const times = timesCheck.available_times;
+        let preferredIndex = 0;
+        if (times.length >= 3) {
+          preferredIndex = 1; // Pick 2nd slot if 3+ available
+        } else if (times.length === 2) {
+          preferredIndex = 1; // Pick 2nd slot if 2 available
+        }
+        const availableTime = times[preferredIndex];
         logSuccess(
-          `Times available! First slot: ${availableTime} (${timesCheck.available_times.length} total)`
+          `Times available! Using slot ${preferredIndex + 1}/${
+            times.length
+          }: ${availableTime}`
         );
 
         logInfo("Navigating to reschedule page...");
@@ -472,12 +522,18 @@ const rescheduler = async (email, password, currentDate, scheduleId, facilityId 
           continue;
         }
 
-        // Select the first available time
-        logInfo(`Selecting first available time...`);
+        // Select preferred time slot (2nd or 3rd if available, to avoid contest for 1st)
+        logInfo(`Selecting preferred time slot...`);
         const selectedTime = await driver.executeScript(`
           const select = document.getElementById('appointments_consulate_appointment_time');
-          if (select.options.length > 1) {
-            select.selectedIndex = 1;
+          const optionCount = select.options.length - 1; // Exclude placeholder
+          if (optionCount >= 1) {
+            // Prefer 2nd slot if multiple available, else take what's there
+            let targetIndex = 1; // First actual option (index 0 is placeholder)
+            if (optionCount >= 2) {
+              targetIndex = 2; // 2nd time slot
+            }
+            select.selectedIndex = targetIndex;
             select.dispatchEvent(new Event('change', { bubbles: true }));
             return select.value;
           }
@@ -872,9 +928,17 @@ const rescheduler = async (email, password, currentDate, scheduleId, facilityId 
                   continue; // Skip to next date
                 }
 
-                // Populate ASC time dropdown and select first time
-                const firstAscTime = ascAvailableTimes[0];
-                logInfo(`Selecting ASC time: ${firstAscTime}`);
+                // Populate ASC time dropdown and select preferred time (2nd if available)
+                let ascTimeIndex = 0;
+                if (ascAvailableTimes.length >= 2) {
+                  ascTimeIndex = 1; // Pick 2nd slot
+                }
+                const selectedAscTime = ascAvailableTimes[ascTimeIndex];
+                logInfo(
+                  `Selecting ASC time ${ascTimeIndex + 1}/${
+                    ascAvailableTimes.length
+                  }: ${selectedAscTime}`
+                );
 
                 const ascTimeSet = await driver.executeScript(`
                   const select = document.getElementById('appointments_asc_appointment_time');
@@ -894,8 +958,8 @@ const rescheduler = async (email, password, currentDate, scheduleId, facilityId 
                     select.add(opt);
                   });
                   
-                  // Select first time
-                  select.value = '${firstAscTime}';
+                  // Select preferred time
+                  select.value = '${selectedAscTime}';
                   select.dispatchEvent(new Event('change', { bubbles: true }));
                   
                   return { success: true, value: select.value, optionsCount: select.options.length };
@@ -903,11 +967,11 @@ const rescheduler = async (email, password, currentDate, scheduleId, facilityId 
 
                 logInfo(`ASC time set result: ${JSON.stringify(ascTimeSet)}`);
 
-                if (!ascTimeSet.success || ascTimeSet.value !== firstAscTime) {
+                if (!ascTimeSet.success || ascTimeSet.value !== selectedAscTime) {
                   logError("Could not select ASC time - skipping this date");
                   continue; // Skip to next date
                 }
-                logSuccess(`ASC time confirmed: ${firstAscTime}`);
+                logSuccess(`ASC time confirmed: ${selectedAscTime}`);
               } else {
                 logError(`Could not click ASC day ${ascTargetDay} - skipping this date`);
                 continue; // Skip to next date
@@ -1078,15 +1142,43 @@ const rescheduler = async (email, password, currentDate, scheduleId, facilityId 
 
         // Check for confirmation or success message
         const pageSource = await driver.getPageSource();
+
+        // Also check for the specific success modal
+        const successModalCheck = await driver.executeScript(`
+          const pageText = document.body.innerText || '';
+          // Check for "Usted ha programado exitosamente su cita de visa"
+          const isSuccess = pageText.includes('programado exitosamente') || 
+                           pageText.includes('exitosamente su cita') ||
+                           pageText.includes('Successfully') ||
+                           pageText.includes('successfully scheduled');
+          
+          // Try to click "No gracias" to dismiss the premium offer modal
+          if (isSuccess) {
+            const noGraciasBtn = Array.from(document.querySelectorAll('button, a.button')).find(
+              btn => btn.textContent.trim().toLowerCase().includes('no gracias')
+            );
+            if (noGraciasBtn) {
+              noGraciasBtn.click();
+              return { success: true, dismissed: true };
+            }
+            return { success: true, dismissed: false };
+          }
+          return { success: false };
+        `);
+
         if (
+          successModalCheck.success ||
           pageSource.includes("Successfully") ||
           pageSource.includes("successfully") ||
           pageSource.includes("exitosamente") ||
           pageSource.includes("confirmada") ||
-          pageSource.includes("programada correctamente")
+          pageSource.includes("programada correctamente") ||
+          pageSource.includes("programado exitosamente")
         ) {
-          playSuccessSound(); // Celebratory sound!
-          logSuccess(`🎉 RESCHEDULED SUCCESSFULLY to ${date.date} at ${selectedTime}!`);
+          playSuccessSound(); // 🎉 EPIC CELEBRATION!!!
+          logSuccess(
+            `🎉🎉🎉 RESCHEDULED SUCCESSFULLY to ${date.date} at ${selectedTime}! 🎉🎉🎉`
+          );
           await sendNotification(
             `✅ RESCHEDULED! New date: ${date.date} at ${selectedTime}`
           );
@@ -1141,9 +1233,15 @@ const rescheduler = async (email, password, currentDate, scheduleId, facilityId 
 
     log("");
     logHighlight("Starting appointment monitor...");
-    log(
-      `Looking for dates earlier than: ${colors.bright}${MY_SCHEDULE_DATE}${colors.reset}`
-    );
+    if (NOT_EARLIER_THAN) {
+      log(
+        `Looking for dates between: ${colors.bright}${NOT_EARLIER_THAN}${colors.reset} and ${colors.bright}${MY_SCHEDULE_DATE}${colors.reset}`
+      );
+    } else {
+      log(
+        `Looking for dates earlier than: ${colors.bright}${MY_SCHEDULE_DATE}${colors.reset}`
+      );
+    }
     log("");
 
     while (1) {
@@ -1172,7 +1270,16 @@ const rescheduler = async (email, password, currentDate, scheduleId, facilityId 
         });
 
         const validDates = dates.filter(({ date }) => {
-          return moment(date).isBefore(moment(MY_SCHEDULE_DATE), "day");
+          const dateM = moment(date);
+          // Must be before current appointment
+          if (!dateM.isBefore(moment(MY_SCHEDULE_DATE), "day")) {
+            return false;
+          }
+          // If NOT_EARLIER_THAN is set, must be on or after that date
+          if (NOT_EARLIER_THAN && dateM.isBefore(moment(NOT_EARLIER_THAN), "day")) {
+            return false;
+          }
+          return true;
         });
 
         if (validDates.length) {
