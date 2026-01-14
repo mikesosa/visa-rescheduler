@@ -1,0 +1,48 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  password  String?  // For credentials auth
+  googleId  String?  @unique
+  image     String?
+  createdAt DateTime @default(now())
+  jobs      Job[]
+}
+
+model Job {
+  id                String    @id @default(cuid())
+  userId            String
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Visa appointment details
+  visaEmail         String
+  visaPassword      String    // Encrypted
+  currentDate       String
+  scheduleId        String
+  facilityId        String    @default("25")
+  notEarlierThan    String?
+  
+  // Job status
+  status            String    // 'active', 'paused', 'stopped', 'success', 'error'
+  processId         Int?      // PID of running rescheduler.js
+  lastCheck         DateTime?
+  lastMessage       String?
+  foundDates        String?   // JSON string (SQLite doesn't have JSON type)
+  
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  successDate       String?
+  successTime       String?
+}

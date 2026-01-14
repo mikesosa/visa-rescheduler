@@ -1,47 +1,191 @@
-# visa-rescheduler
+# Visa Rescheduler SaaS Platform
 
-Automatically monitors and reschedules US visa appointments to earlier dates.
+A B2C SaaS platform for automated US visa appointment rescheduling. Monitor and automatically reschedule your visa appointments to earlier dates.
 
-## Prerequisites
+## 🏗️ Project Structure
 
-- Node.js installed
-- Google Chrome installed (script uses Selenium WebDriver)
-- Install dependencies: `npm install`
+```
+visa-rescheduler/
+├── scripts/              # Rescheduler automation scripts
+│   ├── index.js         # Entry point for rescheduler
+│   ├── rescheduler.js   # Core automation logic
+│   └── package.json     # Script dependencies
+├── src/                 # Next.js application source
+│   ├── app/            # App Router pages & API routes
+│   ├── components/     # React components
+│   └── lib/            # Auth, DB, encryption, job manager
+├── prisma/             # Database schema & migrations
+├── public/             # Static assets
+├── package.json        # Web app dependencies
+└── README.md          # This file
+```
 
-## Usage
+## 🚀 Quick Start
+
+### Prerequisites
+
+- Node.js 18.17+ installed
+- Google Chrome installed (for rescheduler script)
+
+### 1. Install Dependencies
 
 ```bash
+# Install web app dependencies
+npm install
+
+# Install script dependencies
+cd scripts
+npm install
+cd ..
+```
+
+### 2. Environment Setup
+
+The `.env.local` file has been created with defaults. Update these values:
+
+```env
+DATABASE_URL="file:./prisma/dev.db"
+NEXTAUTH_SECRET="generate-with-openssl-rand-base64-32"
+NEXTAUTH_URL="http://localhost:3000"
+GOOGLE_CLIENT_ID="your-google-client-id"
+GOOGLE_CLIENT_SECRET="your-google-client-secret"
+ENCRYPTION_KEY="your-32-char-encryption-key"
+```
+
+### 3. Initialize Database
+
+```bash
+npx prisma migrate dev
+npx prisma generate
+```
+
+### 4. Start Development Server
+
+```bash
+npm run dev
+```
+
+Visit: **http://localhost:3000**
+
+## 📱 Using the Platform
+
+1. **Sign Up**: Create an account at http://localhost:3000/signup
+2. **Login**: Sign in with your credentials
+3. **Create Job**: Go to Dashboard → New Monitoring Job
+4. **Enter Details**:
+   - Visa account credentials
+   - Current appointment date
+   - Schedule ID
+   - Optional: Minimum date (don't book before)
+5. **Monitor**: Dashboard shows real-time status updates
+
+## 🛠️ Using Scripts Standalone
+
+You can also run the rescheduler script directly without the web interface:
+
+```bash
+cd scripts
 node index.js <email> <password> <current-date> <schedule-id> [facility-id] [not-earlier-than]
 ```
 
-| Argument           | Description                                                    |
-| ------------------ | -------------------------------------------------------------- |
-| `email`            | Your visa appointment account email                            |
-| `password`         | Your account password                                          |
-| `current-date`     | Your current appointment date (`YYYY-MM-DD`)                   |
-| `schedule-id`      | Your appointment schedule ID (found in the URL when logged in) |
-| `facility-id`      | (Optional) Consulate facility ID. Default: 25 (Bogota)         |
-| `not-earlier-than` | (Optional) Minimum date - won't book before this (`YYYY-MM-DD`)|
+See [`scripts/README.md`](scripts/README.md) for detailed script usage.
 
-### Examples
+## 🔒 Security Features
 
-Basic usage:
+- **Password Hashing**: Bcrypt with 10 rounds for user accounts
+- **Encryption**: AES-256 for visa credentials
+- **JWT Sessions**: Secure token-based authentication
+- **CSRF Protection**: Built-in with NextAuth
+- **SQL Injection Prevention**: Prisma ORM parameterized queries
+
+## 📊 Tech Stack
+
+- **Frontend**: Next.js 14, React 18, TypeScript, Tailwind CSS
+- **Backend**: Next.js API Routes, Node.js
+- **Database**: Prisma ORM with SQLite (dev) / PostgreSQL (prod)
+- **Auth**: NextAuth.js v4
+- **Process Management**: Node.js child_process
+- **Automation**: Selenium WebDriver, ChromeDriver
+
+## 🎯 Key Features
+
+### For Users
+- Automated 24/7 monitoring (checks every 60 seconds)
+- Smart slot selection (avoids racing for first slots)
+- Handles both Consulate and ASC appointments
+- Real-time dashboard updates
+- Secure credential storage
+
+### For Developers
+- RESTful API design
+- TypeScript for type safety
+- Prisma for database migrations
+- Process lifecycle management
+- Clean separation of concerns
+
+## 📁 Important Files
+
+- **`src/lib/job-manager.ts`**: Spawns and monitors rescheduler processes
+- **`src/lib/auth.ts`**: NextAuth configuration
+- **`src/lib/encryption.ts`**: AES-256 encryption utilities
+- **`src/app/api/jobs/route.ts`**: Job CRUD API endpoints
+- **`scripts/index.js`**: Rescheduler entry point
+- **`scripts/rescheduler.js`**: Core automation logic
+
+## 🧪 Testing
+
+Build the application:
 ```bash
-node index.js test@gmail.com 'mypassword123' 2027-01-15 72409682
+npm run build
 ```
 
-With minimum date (only book appointments from Jan 22nd onwards):
+Run development server:
 ```bash
-node index.js test@gmail.com 'mypassword123' 2027-01-15 72409682 25 2026-01-22
+npm run dev
 ```
 
-> **Note:** If your password contains special characters (`*`, `@`, `!`, etc.), wrap it in single quotes.
+## 📖 Documentation
 
-## How it works
+- [`scripts/README.md`](scripts/README.md) - Rescheduler script documentation
+- [`INTEGRATION_TEST.md`](INTEGRATION_TEST.md) - End-to-end testing guide
+- [`PROJECT_SUMMARY.md`](PROJECT_SUMMARY.md) - Complete implementation overview
 
-1. Logs into the US visa appointment system
-2. Checks for available dates every 60 seconds
-3. If a date earlier than your current appointment is found, it reschedules automatically
-4. Uses smart slot selection (prefers 2nd/3rd slots to avoid racing with others)
-5. Handles both Consulate and ASC (biometrics) appointments
-6. Plays sound alerts when earlier dates are found or rescheduled
+## 🚢 Deployment
+
+### Development
+- SQLite database (included)
+- Local Node.js server
+- File-based sessions
+
+### Production Recommendations
+1. **Database**: Migrate to PostgreSQL
+2. **Backend**: Deploy to dedicated server (Vercel + separate backend)
+3. **Queue**: Use Bull/BullMQ for process management
+4. **Monitoring**: Add Sentry for error tracking
+5. **Logging**: Implement structured logging (Winston/Pino)
+6. **Scaling**: Add Redis for caching and sessions
+
+## 🔮 Future Enhancements
+
+- [ ] Stripe integration for subscriptions
+- [ ] Email notifications (SendGrid)
+- [ ] SMS alerts (Twilio)
+- [ ] WebSocket for real-time updates
+- [ ] Job history and analytics
+- [ ] Multi-user team accounts
+- [ ] Admin dashboard
+- [ ] API webhooks
+
+## 📝 License
+
+Private project - All rights reserved
+
+## 🤝 Contributing
+
+This is a private project. For issues or suggestions, please contact the maintainer.
+
+---
+
+**Status**: ✅ Production-ready foundation
+**Build**: ✅ Passing
+**Version**: 1.0.0
