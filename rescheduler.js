@@ -247,13 +247,36 @@ const rescheduler = async (email, password, currentDate, scheduleId, facilityId 
 
         logInfo("Navigating to reschedule page...");
         await driver.get(APPOINTMENT_URL);
-        await sleep(3000);
+
+        // Wait for the page to fully load by checking for the facility dropdown
+        logInfo("Waiting for page to load...");
+        try {
+          await driver.wait(
+            until.elementLocated(By.id("appointments_consulate_appointment_facility_id")),
+            15000
+          );
+        } catch (e) {
+          logError("Page failed to load - facility dropdown not found");
+          // Save debug HTML
+          const fs = require("fs");
+          fs.writeFileSync(
+            `debug-pageload-${Date.now()}.html`,
+            await driver.getPageSource()
+          );
+          throw new Error("Page failed to load");
+        }
+        await sleep(1000);
 
         // Select the facility/consulate from dropdown
         logInfo("Selecting consulate...");
         const facilityDropdown = await driver.findElement(
           By.id("appointments_consulate_appointment_facility_id")
         );
+        await driver.executeScript(
+          "arguments[0].scrollIntoView(true);",
+          facilityDropdown
+        );
+        await sleep(500);
         await facilityDropdown.click();
         await sleep(500);
         const facilityOption = await driver.findElement(
@@ -264,157 +287,803 @@ const rescheduler = async (email, password, currentDate, scheduleId, facilityId 
         await facilityOption.click();
         await sleep(2000);
 
-        // Use jQuery UI Datepicker API to properly set the date and trigger time slot loading
-        logInfo(`Setting date: ${date.date} via datepicker...`);
+        // Wait for date field to be available (it's readonly, so we check if it exists)
+        logInfo(`Opening datepicker for ${date.date}...`);
+        await sleep(500);
 
-        // First, let's see what the current date value is
-        const beforeDate = await driver.executeScript(`
-          return document.getElementById('appointments_consulate_appointment_date').value;
-        `);
-        logInfo(`Date field BEFORE: "${beforeDate}"`);
-
-        // Try setting the date using jQuery datepicker
-        await driver.executeScript(`
-          const dateInput = $('#appointments_consulate_appointment_date');
-          dateInput.datepicker('setDate', '${date.date}');
-          dateInput.trigger('change');
-          dateInput.trigger('blur');
-        `);
-        await sleep(1000);
-
-        // Check what the date field shows now
-        const afterDate = await driver.executeScript(`
-          return document.getElementById('appointments_consulate_appointment_date').value;
-        `);
-        logInfo(`Date field AFTER: "${afterDate}"`);
-
-        // If datepicker didn't work, try clicking the date in the calendar
-        if (!afterDate || afterDate === beforeDate) {
-          logWarn("Datepicker setDate didn't work, trying to click on calendar...");
-
-          // Click on the date input to open calendar
-          const dateInputEl = await driver.findElement(
-            By.id("appointments_consulate_appointment_date")
+        // Click the calendar icon to open datepicker (date input is readonly)
+        try {
+          const calendarIcon = await driver.findElement(
+            By.css("#appointments_consulate_appointment_date_input .calendar_icon")
           );
-          await dateInputEl.click();
+          await driver.executeScript(
+            "arguments[0].scrollIntoView({block: 'center'});",
+            calendarIcon
+          );
+          await sleep(300);
+          await calendarIcon.click();
           await sleep(1000);
-
-          // Look for the date in the calendar and click it
-          // The datepicker has format like data-month="8" data-year="2026" for September
-          const [year, month, day] = date.date.split("-");
-          const monthIndex = parseInt(month) - 1; // 0-indexed
-          const dayNum = parseInt(day);
-
-          logInfo(
-            `Looking for calendar day: ${dayNum} in month ${monthIndex}, year ${year}`
-          );
-
-          try {
-            // Find clickable day in the datepicker
-            const daySelector = `td[data-month="${monthIndex}"][data-year="${year}"] a:contains("${dayNum}")`;
-            await driver.executeScript(`
-              // Find the day cell and click it
-              const cells = document.querySelectorAll('#ui-datepicker-div td[data-handler="selectDay"]');
-              for (const cell of cells) {
-                if (cell.dataset.month === "${monthIndex}" && cell.dataset.year === "${year}") {
-                  const dayLink = cell.querySelector('a');
-                  if (dayLink && dayLink.textContent === "${dayNum}") {
-                    dayLink.click();
-                    break;
-                  }
-                }
-              }
-            `);
-            await sleep(2000);
-          } catch (e) {
-            logWarn(`Could not click calendar day: ${e.message}`);
-          }
-
-          // Check date field again
-          const finalDate = await driver.executeScript(`
-            return document.getElementById('appointments_consulate_appointment_date').value;
+        } catch (iconError) {
+          logWarn("Calendar icon click failed, trying jQuery approach...");
+          await driver.executeScript(`
+            $('#appointments_consulate_appointment_date').datepicker('show');
           `);
-          logInfo(`Date field FINAL: "${finalDate}"`);
+          await sleep(1000);
         }
 
-        await sleep(1000); // Brief wait
-
-        // FAST PATH: Instead of waiting for UI to load times, inject the time directly!
-        // We already know the available time from the API check
-        logInfo(`Injecting time ${availableTime} directly into dropdown...`);
-
-        await driver.executeScript(`
-          const timeSelect = document.getElementById('appointments_consulate_appointment_time');
-          // Clear existing options
-          timeSelect.innerHTML = '<option value=""></option>';
-          // Add our known time
-          const option = document.createElement('option');
-          option.value = '${availableTime}';
-          option.text = '${availableTime}';
-          option.selected = true;
-          timeSelect.appendChild(option);
-          // Trigger change event
-          timeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+        // Verify datepicker opened
+        const datepickerVisible = await driver.executeScript(`
+          const dp = document.getElementById('ui-datepicker-div');
+          return dp && dp.style.display !== 'none' && dp.offsetParent !== null;
         `);
 
-        await sleep(500);
-        const selectedTime = availableTime;
-        logSuccess(`Injected time: ${selectedTime}`);
+        if (!datepickerVisible) {
+          logWarn("Datepicker still not visible, forcing show...");
+          await driver.executeScript(`
+            $('#appointments_consulate_appointment_date').datepicker('show');
+          `);
+          await sleep(1000);
+        }
 
-        // Log the current state of ASC section before submitting
+        logInfo("Datepicker opened: " + (datepickerVisible ? "yes" : "forcing..."));
+
+        // Parse the target date
+        const [year, month, day] = date.date.split("-");
+        const targetYear = parseInt(year);
+        const targetMonth = parseInt(month) - 1; // 0-indexed
+        const targetDay = parseInt(day);
+
+        // Navigate to the correct month/year in the datepicker
+        logInfo(`Navigating to ${month}/${year} in calendar...`);
+
+        // Keep clicking next/prev until we reach the target month
+        let attempts = 0;
+        while (attempts < 24) {
+          // Max 2 years of navigation
+          const currentMonthYear = await driver.executeScript(`
+            const header = document.querySelector('#ui-datepicker-div .ui-datepicker-title');
+            const monthSpan = document.querySelector('#ui-datepicker-div .ui-datepicker-month');
+            const yearSpan = document.querySelector('#ui-datepicker-div .ui-datepicker-year');
+            return {
+              month: monthSpan ? monthSpan.textContent : '',
+              year: yearSpan ? yearSpan.textContent : '',
+              visible: document.querySelector('#ui-datepicker-div') && 
+                       document.querySelector('#ui-datepicker-div').style.display !== 'none'
+            };
+          `);
+
+          if (!currentMonthYear.visible) {
+            logWarn("Datepicker closed unexpectedly, reopening...");
+            await driver.executeScript(`
+              $('#appointments_consulate_appointment_date').datepicker('show');
+            `);
+            await sleep(500);
+            continue;
+          }
+
+          const currentYear = parseInt(currentMonthYear.year);
+          // English and Spanish month names
+          const monthNamesEn = [
+            "January",
+            "February",
+            "March",
+            "April",
+            "May",
+            "June",
+            "July",
+            "August",
+            "September",
+            "October",
+            "November",
+            "December",
+          ];
+          const monthNamesEs = [
+            "Enero",
+            "Febrero",
+            "Marzo",
+            "Abril",
+            "Mayo",
+            "Junio",
+            "Julio",
+            "Agosto",
+            "Septiembre",
+            "Octubre",
+            "Noviembre",
+            "Diciembre",
+          ];
+
+          let currentMonthIndex = monthNamesEn.findIndex((m) =>
+            currentMonthYear.month.toLowerCase().includes(m.toLowerCase().substring(0, 3))
+          );
+          if (currentMonthIndex === -1) {
+            currentMonthIndex = monthNamesEs.findIndex((m) =>
+              currentMonthYear.month
+                .toLowerCase()
+                .includes(m.toLowerCase().substring(0, 3))
+            );
+          }
+
+          if (currentYear === targetYear && currentMonthIndex === targetMonth) {
+            break; // Found the right month
+          }
+
+          // Need to navigate
+          const needsNext =
+            currentYear < targetYear ||
+            (currentYear === targetYear && currentMonthIndex < targetMonth);
+
+          if (needsNext) {
+            await driver.executeScript(`
+              document.querySelector('#ui-datepicker-div .ui-datepicker-next').click();
+            `);
+          } else {
+            await driver.executeScript(`
+              document.querySelector('#ui-datepicker-div .ui-datepicker-prev').click();
+            `);
+          }
+          await sleep(300);
+          attempts++;
+        }
+
+        // Now click on the specific day
+        logInfo(`Clicking on day ${targetDay}...`);
+        const dayClicked = await driver.executeScript(`
+          const targetDay = ${targetDay};
+          const cells = document.querySelectorAll('#ui-datepicker-div td[data-handler="selectDay"]');
+          for (const cell of cells) {
+            const link = cell.querySelector('a');
+            if (link && parseInt(link.textContent.trim()) === targetDay) {
+              link.click();
+              return true;
+            }
+          }
+          return false;
+        `);
+
+        if (!dayClicked) {
+          logWarn(`Could not find day ${targetDay} in calendar`);
+        }
+
+        await sleep(2000); // Wait for times to load via AJAX
+
+        // Check if date was set
+        const setDate = await driver.executeScript(`
+          return document.getElementById('appointments_consulate_appointment_date').value;
+        `);
+        logInfo(`Date field now: "${setDate}"`);
+
+        // Wait for time dropdown to populate
+        logInfo(`Waiting for time slots...`);
+        let timeLoaded = false;
+        for (let attempt = 0; attempt < 5; attempt++) {
+          const timeCount = await driver.executeScript(`
+            return document.getElementById('appointments_consulate_appointment_time').options.length;
+          `);
+          if (timeCount > 1) {
+            timeLoaded = true;
+            logSuccess(`Time slots loaded: ${timeCount - 1} options`);
+            break;
+          }
+          await sleep(1000);
+        }
+
+        if (!timeLoaded) {
+          logWarn(`Times didn't load via UI for ${date.date}, skipping...`);
+          continue;
+        }
+
+        // Select the first available time
+        logInfo(`Selecting first available time...`);
+        const selectedTime = await driver.executeScript(`
+          const select = document.getElementById('appointments_consulate_appointment_time');
+          if (select.options.length > 1) {
+            select.selectedIndex = 1;
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+            return select.value;
+          }
+          return null;
+        `);
+
+        if (!selectedTime) {
+          logWarn(`Could not select time for ${date.date}, skipping...`);
+          continue;
+        }
+
+        logSuccess(`Selected time: ${selectedTime}`);
+
+        // IMPORTANT: Wait for the site to process consulate selection and activate ASC section
+        logInfo("Waiting for site to activate ASC section...");
+        await sleep(2000);
+
+        // Wait for ASC section to become visible (site should show it after consulate is selected)
+        let ascBecameVisible = false;
+        for (let attempt = 0; attempt < 5; attempt++) {
+          const ascVisibility = await driver.executeScript(`
+            const ascDateTimeDiv = document.getElementById('asc_date_time');
+            if (!ascDateTimeDiv) return { exists: false };
+            const computed = window.getComputedStyle(ascDateTimeDiv);
+            return {
+              exists: true,
+              display: ascDateTimeDiv.style.display,
+              computedDisplay: computed.display,
+              visible: computed.display !== 'none'
+            };
+          `);
+          logInfo(
+            `ASC visibility check ${attempt + 1}: ${JSON.stringify(ascVisibility)}`
+          );
+          if (ascVisibility.visible) {
+            ascBecameVisible = true;
+            logSuccess("ASC section became visible!");
+            break;
+          }
+          await sleep(1000);
+        }
+
+        // If ASC didn't become visible naturally, try triggering it
+        if (!ascBecameVisible) {
+          logWarn("ASC section not visible yet, triggering consulate time change...");
+          await driver.executeScript(`
+            const consulateTime = document.getElementById('appointments_consulate_appointment_time');
+            if (consulateTime) {
+              consulateTime.dispatchEvent(new Event('change', { bubbles: true }));
+              consulateTime.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+          `);
+          await sleep(2000);
+        }
+
+        // Save DOM for debugging ASC section
+        const fs = require("fs");
+        const debugFile = `debug-after-consulate-${Date.now()}.html`;
+        fs.writeFileSync(debugFile, await driver.getPageSource());
+        logInfo(`DOM saved to: ${debugFile}`);
+
+        // Handle ASC (Application Support Center / Biometrics) appointment section
         logInfo("Checking ASC appointment section...");
-        const ascInfo = await driver.executeScript(`
+
+        // Detailed ASC section inspection
+        const ascDebugInfo = await driver.executeScript(`
           const ascSection = document.getElementById('asc-appointment-fields');
+          const ascDateInput = document.getElementById('appointments_asc_appointment_date');
           const ascFacility = document.getElementById('appointments_asc_appointment_facility_id');
-          const ascDate = document.getElementById('appointments_asc_appointment_date');
           const ascTime = document.getElementById('appointments_asc_appointment_time');
           const ascDateTimeDiv = document.getElementById('asc_date_time');
+          const ascDateInputWrapper = document.getElementById('appointments_asc_appointment_date_input');
           
           return {
-            ascSectionVisible: ascSection ? ascSection.offsetParent !== null : false,
-            ascDateTimeDivStyle: ascDateTimeDiv ? ascDateTimeDiv.style.display : 'not found',
+            ascSection: ascSection ? {
+              exists: true,
+              display: window.getComputedStyle(ascSection).display,
+              visibility: window.getComputedStyle(ascSection).visibility,
+              offsetParent: ascSection.offsetParent !== null,
+              className: ascSection.className
+            } : { exists: false },
+            ascDateInput: ascDateInput ? {
+              exists: true,
+              disabled: ascDateInput.disabled,
+              readOnly: ascDateInput.readOnly,
+              value: ascDateInput.value,
+              display: window.getComputedStyle(ascDateInput).display,
+              offsetParent: ascDateInput.offsetParent !== null,
+              className: ascDateInput.className
+            } : { exists: false },
+            ascDateInputWrapper: ascDateInputWrapper ? {
+              exists: true,
+              display: window.getComputedStyle(ascDateInputWrapper).display
+            } : { exists: false },
+            ascDateTimeDiv: ascDateTimeDiv ? {
+              exists: true,
+              display: ascDateTimeDiv.style.display,
+              computedDisplay: window.getComputedStyle(ascDateTimeDiv).display
+            } : { exists: false },
             ascFacility: ascFacility ? {
+              exists: true,
               value: ascFacility.value,
-              disabled: ascFacility.disabled,
-              options: Array.from(ascFacility.options).map(o => ({value: o.value, text: o.text, selected: o.selected}))
-            } : null,
-            ascDate: ascDate ? {
-              value: ascDate.value,
-              disabled: ascDate.disabled,
-              readOnly: ascDate.readOnly
-            } : null,
+              disabled: ascFacility.disabled
+            } : { exists: false },
             ascTime: ascTime ? {
-              value: ascTime.value,
+              exists: true,
               disabled: ascTime.disabled,
-              optionsCount: ascTime.options.length,
-              options: Array.from(ascTime.options).slice(0, 5).map(o => ({value: o.value, text: o.text}))
-            } : null,
-            submitBtn: document.getElementById('appointments_submit')?.disabled
+              optionsCount: ascTime.options.length
+            } : { exists: false }
           };
         `);
 
-        log("ASC Section State:");
-        console.log(JSON.stringify(ascInfo, null, 2));
+        log("ASC Debug Info:");
+        console.log(JSON.stringify(ascDebugInfo, null, 2));
 
-        // Save HTML for debugging ASC section
-        const fs = require("fs");
-        const debugHtml = await driver.getPageSource();
-        const debugFile = `debug-asc-${Date.now()}.html`;
-        fs.writeFileSync(debugFile, debugHtml);
-        logInfo(`Full HTML saved to: ${debugFile}`);
+        // ASC is ALWAYS required - check if the elements exist
+        const ascExists =
+          ascDebugInfo.ascDateInput?.exists && ascDebugInfo.ascFacility?.exists;
+
+        logInfo(
+          `ASC check: exists=${ascExists}, facility=${ascDebugInfo.ascFacility?.value}`
+        );
+
+        if (ascExists) {
+          // Force show the ASC date/time div if it's hidden
+          logInfo("Forcing ASC date/time section visible...");
+          await driver.executeScript(`
+            const ascDateTimeDiv = document.getElementById('asc_date_time');
+            if (ascDateTimeDiv) {
+              ascDateTimeDiv.style.display = 'block';
+            }
+            // Also ensure the date input wrapper is visible
+            const ascDateInputWrapper = document.getElementById('appointments_asc_appointment_date_input');
+            if (ascDateInputWrapper) {
+              ascDateInputWrapper.style.display = 'list-item';
+            }
+            // Trigger change on facility to potentially load available dates
+            const ascFacility = document.getElementById('appointments_asc_appointment_facility_id');
+            if (ascFacility) {
+              ascFacility.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+          `);
+          await sleep(1000);
+          logInfo("ASC section ready, fetching available ASC dates...");
+
+          // Get ASC facility ID
+          const ascFacilityId = ascDebugInfo.ascFacility?.value || "26";
+
+          // Fetch available ASC dates via API
+          const ascDatesUrl = `https://ais.usvisa-info.com/${COUNTRY_CODE}/niv/schedule/${SCHEDULE_ID}/appointment/days/${ascFacilityId}.json?consulate_id=${FACILITY_ID}&consulate_date=${date.date}&consulate_time=${selectedTime}&appointments[expedite]=false`;
+
+          logInfo(`Fetching ASC dates from: ${ascDatesUrl}`);
+
+          const ascDatesResponse = await driver.executeScript(`
+            return fetch("${ascDatesUrl}", {
+              method: "GET",
+              headers: {
+                "Accept": "application/json, text/javascript, */*; q=0.01",
+                "X-Requested-With": "XMLHttpRequest"
+              },
+              credentials: "include"
+            })
+            .then(r => {
+              if (!r.ok) throw new Error('HTTP ' + r.status);
+              return r.json();
+            })
+            .catch(e => ({ error: e.message }));
+          `);
+
+          if (ascDatesResponse.error || !ascDatesResponse.length) {
+            logWarn(
+              `No ASC dates available: ${ascDatesResponse.error || "empty response"}`
+            );
+          } else {
+            logInfo(`Found ${ascDatesResponse.length} ASC dates available`);
+
+            // Log first few ASC dates for debugging
+            const firstAscDates = ascDatesResponse.slice(0, 5).map((d) => d.date);
+            logInfo(`First ASC dates: ${firstAscDates.join(", ")}`);
+
+            // Just take the first available ASC date (site returns valid dates for the selected consulate date)
+            const validAscDates = ascDatesResponse.slice(0, 3);
+
+            if (validAscDates.length > 0) {
+              const ascDate = validAscDates[0].date;
+              const [ascYear, ascMonth, ascDay] = ascDate.split("-");
+              const ascTargetYear = parseInt(ascYear);
+              const ascTargetMonth = parseInt(ascMonth) - 1;
+              const ascTargetDay = parseInt(ascDay);
+
+              logInfo(`Selecting ASC date: ${ascDate}`);
+
+              // Open ASC datepicker
+              await driver.executeScript(`
+                $('#appointments_asc_appointment_date').datepicker('show');
+              `);
+              await sleep(1000);
+
+              // Navigate to the correct month for ASC
+              logInfo(`Navigating ASC calendar to ${ascMonth}/${ascYear}...`);
+              let ascAttempts = 0;
+              while (ascAttempts < 24) {
+                const currentMonthYear = await driver.executeScript(`
+                  const monthSpan = document.querySelector('#ui-datepicker-div .ui-datepicker-month');
+                  const yearSpan = document.querySelector('#ui-datepicker-div .ui-datepicker-year');
+                  return {
+                    month: monthSpan ? monthSpan.textContent : '',
+                    year: yearSpan ? yearSpan.textContent : '',
+                    visible: document.querySelector('#ui-datepicker-div')?.style.display !== 'none'
+                  };
+                `);
+
+                if (!currentMonthYear.visible) break;
+
+                const currentYear = parseInt(currentMonthYear.year);
+                const monthNamesEn = [
+                  "January",
+                  "February",
+                  "March",
+                  "April",
+                  "May",
+                  "June",
+                  "July",
+                  "August",
+                  "September",
+                  "October",
+                  "November",
+                  "December",
+                ];
+                const monthNamesEs = [
+                  "Enero",
+                  "Febrero",
+                  "Marzo",
+                  "Abril",
+                  "Mayo",
+                  "Junio",
+                  "Julio",
+                  "Agosto",
+                  "Septiembre",
+                  "Octubre",
+                  "Noviembre",
+                  "Diciembre",
+                ];
+
+                let currentMonthIndex = monthNamesEn.findIndex((m) =>
+                  currentMonthYear.month
+                    .toLowerCase()
+                    .includes(m.toLowerCase().substring(0, 3))
+                );
+                if (currentMonthIndex === -1) {
+                  currentMonthIndex = monthNamesEs.findIndex((m) =>
+                    currentMonthYear.month
+                      .toLowerCase()
+                      .includes(m.toLowerCase().substring(0, 3))
+                  );
+                }
+
+                if (
+                  currentYear === ascTargetYear &&
+                  currentMonthIndex === ascTargetMonth
+                ) {
+                  break;
+                }
+
+                const needsNext =
+                  currentYear < ascTargetYear ||
+                  (currentYear === ascTargetYear && currentMonthIndex < ascTargetMonth);
+
+                if (needsNext) {
+                  await driver.executeScript(`
+                    document.querySelector('#ui-datepicker-div .ui-datepicker-next').click();
+                  `);
+                } else {
+                  await driver.executeScript(`
+                    document.querySelector('#ui-datepicker-div .ui-datepicker-prev').click();
+                  `);
+                }
+                await sleep(300);
+                ascAttempts++;
+              }
+
+              // Check datepicker state before clicking
+              const dpState = await driver.executeScript(`
+                const dp = document.getElementById('ui-datepicker-div');
+                if (!dp) return { visible: false, error: 'datepicker not found' };
+                
+                const monthSpan = dp.querySelector('.ui-datepicker-month');
+                const yearSpan = dp.querySelector('.ui-datepicker-year');
+                const selectableCells = dp.querySelectorAll('td[data-handler="selectDay"]');
+                const allDayCells = dp.querySelectorAll('td a.ui-state-default');
+                
+                const availableDays = [];
+                selectableCells.forEach(cell => {
+                  const link = cell.querySelector('a');
+                  if (link) availableDays.push(parseInt(link.textContent.trim()));
+                });
+                
+                return {
+                  visible: dp.style.display !== 'none',
+                  month: monthSpan ? monthSpan.textContent : 'unknown',
+                  year: yearSpan ? yearSpan.textContent : 'unknown',
+                  selectableCellsCount: selectableCells.length,
+                  allDayCellsCount: allDayCells.length,
+                  availableDays: availableDays.slice(0, 10),
+                  targetDay: ${ascTargetDay}
+                };
+              `);
+
+              log(`ASC datepicker state:`);
+              console.log(JSON.stringify(dpState, null, 2));
+
+              // Click the ASC day
+              logInfo(`Clicking ASC day ${ascTargetDay}...`);
+              const ascDayClicked = await driver.executeScript(`
+                const targetDay = ${ascTargetDay};
+                
+                // First try: cells with selectDay handler
+                let cells = document.querySelectorAll('#ui-datepicker-div td[data-handler="selectDay"]');
+                for (const cell of cells) {
+                  const link = cell.querySelector('a');
+                  if (link && parseInt(link.textContent.trim()) === targetDay) {
+                    link.click();
+                    return { clicked: true, method: 'selectDay handler' };
+                  }
+                }
+                
+                // Second try: any clickable day link
+                const allLinks = document.querySelectorAll('#ui-datepicker-div td a.ui-state-default');
+                for (const link of allLinks) {
+                  if (parseInt(link.textContent.trim()) === targetDay) {
+                    link.click();
+                    return { clicked: true, method: 'ui-state-default link' };
+                  }
+                }
+                
+                // Third try: use jQuery datepicker API directly
+                try {
+                  const dateStr = '${ascDate}';
+                  $('#appointments_asc_appointment_date').datepicker('setDate', dateStr);
+                  $('#appointments_asc_appointment_date').trigger('change');
+                  return { clicked: true, method: 'jQuery setDate' };
+                } catch(e) {
+                  return { clicked: false, error: e.message };
+                }
+              `);
+
+              logInfo(`ASC day click result: ${JSON.stringify(ascDayClicked)}`);
+
+              if (ascDayClicked?.clicked) {
+                await sleep(2000);
+
+                // Verify ASC date was actually set
+                const ascDateValue = await driver.executeScript(`
+                  return document.getElementById('appointments_asc_appointment_date')?.value || '';
+                `);
+                logInfo(`ASC date field value: "${ascDateValue}"`);
+
+                if (!ascDateValue) {
+                  logError("ASC date was not set in the field!");
+                  continue; // Skip to next date
+                }
+                logSuccess(`ASC date confirmed: ${ascDateValue}`);
+
+                // Fetch ASC times via API (since jQuery setDate doesn't trigger AJAX)
+                logInfo("Fetching ASC time slots via API...");
+                const ascTimesUrl = `https://ais.usvisa-info.com/${COUNTRY_CODE}/niv/schedule/${SCHEDULE_ID}/appointment/times/${ascFacilityId}.json?date=${ascDate}&consulate_id=${FACILITY_ID}&appointments[expedite]=false`;
+
+                const ascTimesResult = await driver.executeScript(`
+                  return fetch("${ascTimesUrl}", {
+                    method: 'GET',
+                    headers: {
+                      'Accept': 'application/json',
+                      'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    credentials: 'include'
+                  })
+                  .then(r => r.json())
+                  .catch(e => ({ error: e.message }));
+                `);
+
+                if (ascTimesResult.error) {
+                  logError(`Failed to fetch ASC times: ${ascTimesResult.error}`);
+                  continue; // Skip to next date
+                }
+
+                const ascAvailableTimes =
+                  ascTimesResult.available_times || ascTimesResult.times || [];
+                logInfo(`ASC times from API: ${JSON.stringify(ascAvailableTimes)}`);
+
+                if (ascAvailableTimes.length === 0) {
+                  logError("No ASC time slots available for this date");
+                  continue; // Skip to next date
+                }
+
+                // Populate ASC time dropdown and select first time
+                const firstAscTime = ascAvailableTimes[0];
+                logInfo(`Selecting ASC time: ${firstAscTime}`);
+
+                const ascTimeSet = await driver.executeScript(`
+                  const select = document.getElementById('appointments_asc_appointment_time');
+                  if (!select) return { success: false, error: 'dropdown not found' };
+                  
+                  // Clear existing options except first placeholder
+                  while (select.options.length > 1) {
+                    select.remove(1);
+                  }
+                  
+                  // Add available times
+                  const times = ${JSON.stringify(ascAvailableTimes)};
+                  times.forEach(time => {
+                    const opt = document.createElement('option');
+                    opt.value = time;
+                    opt.text = time;
+                    select.add(opt);
+                  });
+                  
+                  // Select first time
+                  select.value = '${firstAscTime}';
+                  select.dispatchEvent(new Event('change', { bubbles: true }));
+                  
+                  return { success: true, value: select.value, optionsCount: select.options.length };
+                `);
+
+                logInfo(`ASC time set result: ${JSON.stringify(ascTimeSet)}`);
+
+                if (!ascTimeSet.success || ascTimeSet.value !== firstAscTime) {
+                  logError("Could not select ASC time - skipping this date");
+                  continue; // Skip to next date
+                }
+                logSuccess(`ASC time confirmed: ${firstAscTime}`);
+              } else {
+                logError(`Could not click ASC day ${ascTargetDay} - skipping this date`);
+                continue; // Skip to next date
+              }
+            } else {
+              logError("No valid ASC dates available - skipping");
+              continue; // Skip to next date
+            }
+          }
+        } else {
+          logError("ASC section elements not found - cannot proceed");
+          continue; // Skip to next date
+        }
+
+        // Final verification before submit
+        const finalCheck = await driver.executeScript(`
+          const consulateDate = document.getElementById('appointments_consulate_appointment_date')?.value;
+          const consulateTime = document.getElementById('appointments_consulate_appointment_time')?.value;
+          const ascDate = document.getElementById('appointments_asc_appointment_date')?.value;
+          const ascTime = document.getElementById('appointments_asc_appointment_time')?.value;
+          return { consulateDate, consulateTime, ascDate, ascTime };
+        `);
+
+        log("Final form state before submit:");
+        console.log(JSON.stringify(finalCheck, null, 2));
+
+        if (
+          !finalCheck.consulateDate ||
+          !finalCheck.consulateTime ||
+          !finalCheck.ascDate ||
+          !finalCheck.ascTime
+        ) {
+          logError("Form is incomplete - missing required fields!");
+          logError(
+            `Consulate: ${finalCheck.consulateDate} @ ${finalCheck.consulateTime}`
+          );
+          logError(`ASC: ${finalCheck.ascDate} @ ${finalCheck.ascTime}`);
+          continue; // Skip to next date
+        }
+
+        logSuccess("All fields filled! Ready to submit.");
+        await sleep(1000);
 
         // Click the submit/reschedule button
         logInfo("Submitting reschedule...");
         const submitBtn = await driver.findElement(By.id("appointments_submit"));
         await submitBtn.click();
-        await sleep(3000);
+        await sleep(2000);
+
+        // Handle confirmation modal - wait for it to appear
+        logInfo("Waiting for confirmation modal...");
+        await sleep(1500);
+
+        // Look for the modal and click Confirmar
+        let modalConfirmed = false;
+        for (let attempt = 0; attempt < 5; attempt++) {
+          const confirmResult = await driver.executeScript(`
+            // The modal has "Cancelar" (gray) and "Confirmar" (red) buttons
+            // First try SweetAlert2 style selectors
+            const swalConfirm = document.querySelector('.swal2-confirm');
+            if (swalConfirm && swalConfirm.offsetParent !== null) {
+              swalConfirm.click();
+              return { clicked: true, method: 'swal2-confirm' };
+            }
+            
+            // Try finding buttons by exact text "Confirmar"
+            const allButtons = document.querySelectorAll('button, a.button, a.btn, input[type="button"], input[type="submit"]');
+            for (const btn of allButtons) {
+              const text = btn.textContent.trim();
+              if (text === 'Confirmar' && btn.offsetParent !== null) {
+                btn.click();
+                return { clicked: true, method: 'text-match', text: text };
+              }
+            }
+            
+            // Try common modal confirm button patterns
+            const confirmSelectors = [
+              '.swal2-actions .swal2-confirm',
+              '.sweet-alert button.confirm',
+              '.reveal-modal a.alert',
+              '.modal .btn-danger',
+              '.modal .btn-primary',
+              'button.confirm',
+              '.ui-dialog-buttonpane button:last-child'
+            ];
+            
+            for (const selector of confirmSelectors) {
+              const btn = document.querySelector(selector);
+              if (btn && btn.offsetParent !== null) {
+                btn.click();
+                return { clicked: true, method: 'selector', selector: selector };
+              }
+            }
+            
+            // Check if any modal is visible
+            const modalVisible = !!(
+              document.querySelector('.swal2-popup:not(.swal2-hide)') ||
+              document.querySelector('.sweet-alert:not(.hideSweetAlert)') ||
+              document.querySelector('.reveal-modal[style*="block"]') ||
+              document.querySelector('.modal.show')
+            );
+            
+            return { clicked: false, modalVisible: modalVisible };
+          `);
+
+          logInfo(
+            `Confirmation attempt ${attempt + 1}: ${JSON.stringify(confirmResult)}`
+          );
+
+          if (confirmResult.clicked) {
+            logSuccess("Confirmar button clicked!");
+            modalConfirmed = true;
+            await sleep(3000);
+            break;
+          }
+
+          if (!confirmResult.modalVisible && attempt > 1) {
+            logInfo("No modal visible, continuing...");
+            break;
+          }
+
+          await sleep(1000);
+        }
+
+        if (!modalConfirmed) {
+          logWarn("Could not find Confirmar button - checking page status...");
+        }
+
+        // Check for "slot taken" error modal
+        // "Su cita no pudo ser programada. Por favor, haga una selección válida."
+        await sleep(1000);
+        const errorModalCheck = await driver.executeScript(`
+          const pageText = document.body.innerText || '';
+          const hasError = pageText.includes('no pudo ser programada') || 
+                          pageText.includes('selección válida') ||
+                          pageText.includes('could not be scheduled') ||
+                          pageText.includes('no longer available');
+          
+          // Try to click OK button to dismiss error
+          if (hasError) {
+            const okButtons = document.querySelectorAll('button, a.button');
+            for (const btn of okButtons) {
+              const text = btn.textContent.trim().toUpperCase();
+              if ((text === 'OK' || text === 'ACEPTAR') && btn.offsetParent !== null) {
+                btn.click();
+                return { hasError: true, dismissed: true };
+              }
+            }
+            // Also try SweetAlert2 confirm button
+            const swalBtn = document.querySelector('.swal2-confirm');
+            if (swalBtn) {
+              swalBtn.click();
+              return { hasError: true, dismissed: true };
+            }
+            return { hasError: true, dismissed: false };
+          }
+          return { hasError: false };
+        `);
+
+        if (errorModalCheck.hasError) {
+          logWarn(`Slot was taken while filling form - trying next date...`);
+          if (errorModalCheck.dismissed) {
+            logInfo("Error modal dismissed");
+          }
+          await sleep(1000);
+          continue; // Try next date
+        }
 
         // Check for confirmation or success message
         const pageSource = await driver.getPageSource();
         if (
           pageSource.includes("Successfully") ||
           pageSource.includes("successfully") ||
-          pageSource.includes("exitosamente")
+          pageSource.includes("exitosamente") ||
+          pageSource.includes("confirmada") ||
+          pageSource.includes("programada correctamente")
         ) {
           playSuccessSound(); // Celebratory sound!
           logSuccess(`🎉 RESCHEDULED SUCCESSFULLY to ${date.date} at ${selectedTime}!`);
@@ -423,6 +1092,18 @@ const rescheduler = async (email, password, currentDate, scheduleId, facilityId 
           );
           return true; // Success!
         } else {
+          // Double-check we're not still on the form page
+          const stillOnForm = await driver.executeScript(`
+            return !!document.getElementById('appointments_submit');
+          `);
+
+          if (stillOnForm) {
+            logWarn(
+              "Still on form page - submission may have failed, trying next date..."
+            );
+            continue; // Try next date
+          }
+
           logWarn("Reschedule submitted - please verify in browser");
           await sendNotification(
             `Reschedule attempted: ${date.date} at ${selectedTime} - please verify`
