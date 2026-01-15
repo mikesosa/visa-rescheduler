@@ -7,7 +7,7 @@
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "next lint",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate && cd scripts && npm install"
   },
   "dependencies": {
     "next": "^14.2.0",
@@ -17,7 +17,10 @@
     "@auth/prisma-adapter": "^1.6.0",
     "@prisma/client": "^5.19.0",
     "bcryptjs": "^2.4.3",
-    "zod": "^3.24.1"
+    "zod": "^3.24.1",
+    "axios": "^0.27.2",
+    "moment": "^2.29.3",
+    "selenium-webdriver": "^4.2.0"
   },
   "devDependencies": {
     "typescript": "^5.6.3",

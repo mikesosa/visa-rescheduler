@@ -152,18 +152,52 @@ npm run dev
 
 ## 🚢 Deployment
 
-### Development
-- SQLite database (included)
-- Local Node.js server
-- File-based sessions
+### ⚠️ Important: Vercel Limitations
 
-### Production Recommendations
-1. **Database**: Migrate to PostgreSQL
-2. **Backend**: Deploy to dedicated server (Vercel + separate backend)
-3. **Queue**: Use Bull/BullMQ for process management
-4. **Monitoring**: Add Sentry for error tracking
-5. **Logging**: Implement structured logging (Winston/Pino)
-6. **Scaling**: Add Redis for caching and sessions
+**Vercel is NOT suitable for running the rescheduler jobs** because:
+1. Vercel functions are serverless with a 10-second timeout (60s max on Pro)
+2. No persistent file system for ChromeDriver
+3. No support for Selenium/Chrome in serverless functions
+4. Jobs need to run continuously for hours
+
+### Recommended Deployment Architecture
+
+#### Option 1: Vercel Frontend + VPS Backend (Recommended)
+
+**Frontend (Vercel)**:
+- Deploy Next.js app to Vercel
+- Use PostgreSQL database (Vercel Postgres or Neon)
+- Set environment variables in Vercel dashboard
+
+**Backend (Separate VPS - DigitalOcean/AWS/Linode)**:
+- Run Node.js server with job manager
+- Install Chrome/ChromeDriver
+- Run long-lived processes
+- Connect to same PostgreSQL database
+
+#### Option 2: Full VPS Deployment
+
+Deploy everything on a single VPS with:
+- Node.js 18+
+- Chrome/ChromeDriver installed
+- PostgreSQL database
+- PM2 or systemd for process management
+
+### Environment Variables for Production
+
+```env
+DATABASE_URL="postgresql://..."  # PostgreSQL connection string
+NEXTAUTH_SECRET="generate-with-openssl-rand-base64-32"
+NEXTAUTH_URL="https://your-domain.com"
+ENCRYPTION_KEY="generate-with-openssl-rand-base64-32"
+GOOGLE_CLIENT_ID="optional-for-google-oauth"
+GOOGLE_CLIENT_SECRET="optional-for-google-oauth"
+```
+
+### Development
+- PostgreSQL database (local or Neon)
+- Local Node.js server
+- Chrome installed for Selenium
 
 ## 🔮 Future Enhancements
 
