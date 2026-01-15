@@ -24,6 +24,9 @@ export default function DashboardPage() {
   const router = useRouter();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedJobLogs, setSelectedJobLogs] = useState<string | null>(null);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logsJobId, setLogsJobId] = useState<string | null>(null);
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -69,6 +72,32 @@ export default function DashboardPage() {
     } catch (error) {
       console.error("Error deleting job:", error);
     }
+  };
+
+  const handleViewLogs = async (jobId: string) => {
+    setLogsJobId(jobId);
+    setLogsLoading(true);
+    setSelectedJobLogs(null);
+
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/logs`);
+      if (res.ok) {
+        const data = await res.json();
+        setSelectedJobLogs(data.logs);
+      } else {
+        setSelectedJobLogs("Error loading logs");
+      }
+    } catch (error) {
+      console.error("Error fetching logs:", error);
+      setSelectedJobLogs("Error loading logs");
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+
+  const closeLogs = () => {
+    setSelectedJobLogs(null);
+    setLogsJobId(null);
   };
 
   if (status === "loading" || loading) {
@@ -217,6 +246,12 @@ export default function DashboardPage() {
 
                 <div className="flex gap-3">
                   <button
+                    onClick={() => handleViewLogs(job.id)}
+                    className="px-4 py-2 border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50 font-medium"
+                  >
+                    View Logs
+                  </button>
+                  <button
                     onClick={() => handleDeleteJob(job.id)}
                     className="px-4 py-2 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 font-medium"
                   >
@@ -228,6 +263,59 @@ export default function DashboardPage() {
           </div>
         )}
       </main>
+
+      {/* Logs Modal */}
+      {logsJobId && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] flex flex-col">
+            {/* Modal Header */}
+            <div className="flex justify-between items-center p-6 border-b">
+              <h3 className="text-xl font-semibold text-gray-900">
+                Job Logs - {jobs.find(j => j.id === logsJobId)?.scheduleId}
+              </h3>
+              <button
+                onClick={closeLogs}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="flex-1 overflow-auto p-6">
+              {logsLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+                  <span className="ml-3 text-gray-600">Loading logs...</span>
+                </div>
+              ) : (
+                <pre className="bg-gray-900 text-green-400 p-4 rounded-lg text-xs overflow-x-auto font-mono whitespace-pre-wrap">
+                  {selectedJobLogs || "No logs available"}
+                </pre>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex justify-between items-center p-6 border-t bg-gray-50">
+              <button
+                onClick={() => handleViewLogs(logsJobId)}
+                disabled={logsLoading}
+                className="px-4 py-2 text-blue-600 hover:text-blue-800 font-medium disabled:opacity-50"
+              >
+                🔄 Refresh
+              </button>
+              <button
+                onClick={closeLogs}
+                className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 font-medium"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

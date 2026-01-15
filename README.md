@@ -110,6 +110,7 @@ See [`scripts/README.md`](scripts/README.md) for detailed script usage.
 ## 🎯 Key Features
 
 ### For Users
+
 - Automated 24/7 monitoring (checks every 60 seconds)
 - Smart slot selection (avoids racing for first slots)
 - Handles both Consulate and ASC appointments
@@ -117,6 +118,7 @@ See [`scripts/README.md`](scripts/README.md) for detailed script usage.
 - Secure credential storage
 
 ### For Developers
+
 - RESTful API design
 - TypeScript for type safety
 - Prisma for database migrations
@@ -135,11 +137,13 @@ See [`scripts/README.md`](scripts/README.md) for detailed script usage.
 ## 🧪 Testing
 
 Build the application:
+
 ```bash
 npm run build
 ```
 
 Run development server:
+
 ```bash
 npm run dev
 ```
@@ -155,6 +159,7 @@ npm run dev
 ### ⚠️ Important: Vercel Limitations
 
 **Vercel is NOT suitable for running the rescheduler jobs** because:
+
 1. Vercel functions are serverless with a 10-second timeout (60s max on Pro)
 2. No persistent file system for ChromeDriver
 3. No support for Selenium/Chrome in serverless functions
@@ -165,11 +170,13 @@ npm run dev
 #### Option 1: Vercel Frontend + VPS Backend (Recommended)
 
 **Frontend (Vercel)**:
+
 - Deploy Next.js app to Vercel
 - Use PostgreSQL database (Vercel Postgres or Neon)
 - Set environment variables in Vercel dashboard
 
 **Backend (Separate VPS - DigitalOcean/AWS/Linode)**:
+
 - Run Node.js server with job manager
 - Install Chrome/ChromeDriver
 - Run long-lived processes
@@ -178,6 +185,7 @@ npm run dev
 #### Option 2: Full VPS Deployment
 
 Deploy everything on a single VPS with:
+
 - Node.js 18+
 - Chrome/ChromeDriver installed
 - PostgreSQL database
@@ -195,6 +203,7 @@ GOOGLE_CLIENT_SECRET="optional-for-google-oauth"
 ```
 
 ### Development
+
 - PostgreSQL database (local or Neon)
 - Local Node.js server
 - Chrome installed for Selenium
