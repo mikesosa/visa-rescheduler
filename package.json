@@ -7,7 +7,7 @@
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "next lint",
-    "postinstall": "prisma generate && cd scripts && npm install"
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "next": "^14.2.0",
