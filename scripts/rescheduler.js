@@ -714,11 +714,63 @@ const rescheduler = async (
             const firstAscDates = ascDatesResponse.slice(0, 5).map((d) => d.date);
             logInfo(`First ASC dates: ${firstAscDates.join(", ")}`);
 
-            // Just take the first available ASC date (site returns valid dates for the selected consulate date)
-            const validAscDates = ascDatesResponse.slice(0, 3);
+            // SMART SCHEDULING: Pick ASC date closest to consulate date (ideally day before)
+            // Filter ASC dates to only those that respect NOT_EARLIER_THAN
+            let validAscDates = ascDatesResponse;
+            if (NOT_EARLIER_THAN) {
+              validAscDates = ascDatesResponse.filter((d) =>
+                moment(d.date).isSameOrAfter(moment(NOT_EARLIER_THAN), "day")
+              );
+              logInfo(`After NOT_EARLIER_THAN filter: ${validAscDates.length} ASC dates`);
+            }
+
+            if (validAscDates.length === 0) {
+              logWarn("No valid ASC dates after applying date filters");
+              continue; // Skip to next consulate date
+            }
+
+            // Sort ASC dates by proximity to consulate date (closest first)
+            const consulateDate = moment(date.date);
+            validAscDates.sort((a, b) => {
+              const diffA = Math.abs(consulateDate.diff(moment(a.date), "days"));
+              const diffB = Math.abs(consulateDate.diff(moment(b.date), "days"));
+
+              // If both are before consulate, prefer the one closer (day before is best)
+              const aIsBefore = moment(a.date).isBefore(consulateDate, "day");
+              const bIsBefore = moment(b.date).isBefore(consulateDate, "day");
+
+              if (aIsBefore && bIsBefore) {
+                // Both before: prefer closest (day before = 1 day diff is ideal)
+                return diffA - diffB;
+              } else if (aIsBefore && !bIsBefore) {
+                // Prefer the one before consulate
+                return -1;
+              } else if (!aIsBefore && bIsBefore) {
+                // Prefer the one before consulate
+                return 1;
+              } else {
+                // Both after: prefer closest
+                return diffA - diffB;
+              }
+            });
+
+            // Pick the best ASC date (closest to consulate, ideally day before)
+            const bestAscDate = validAscDates[0];
+            const ascDate = bestAscDate.date;
+            const daysDiff = consulateDate.diff(moment(ascDate), "days");
+
+            logInfo(`📅 Selected ASC date: ${ascDate}`);
+            if (daysDiff === 1) {
+              logSuccess(`✨ Perfect! ASC is 1 day before consulate`);
+            } else if (daysDiff > 0) {
+              logInfo(`ASC is ${daysDiff} days before consulate`);
+            } else if (daysDiff === 0) {
+              logWarn(`ASC is same day as consulate`);
+            } else {
+              logWarn(`ASC is ${Math.abs(daysDiff)} days after consulate`);
+            }
 
             if (validAscDates.length > 0) {
-              const ascDate = validAscDates[0].date;
               const [ascYear, ascMonth, ascDay] = ascDate.split("-");
               const ascTargetYear = parseInt(ascYear);
               const ascTargetMonth = parseInt(ascMonth) - 1;
