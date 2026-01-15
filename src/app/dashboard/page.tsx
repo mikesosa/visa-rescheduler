@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import LogViewer from "@/components/LogViewer";
+import EditJobModal from "@/components/EditJobModal";
 
 interface Job {
   id: string;
@@ -11,6 +13,7 @@ interface Job {
   currentDate: string;
   scheduleId: string;
   facilityId: string;
+  notEarlierThan?: string;
   status: string;
   lastCheck?: string;
   lastMessage?: string;
@@ -27,6 +30,8 @@ export default function DashboardPage() {
   const [selectedJobLogs, setSelectedJobLogs] = useState<string | null>(null);
   const [logsLoading, setLogsLoading] = useState(false);
   const [logsJobId, setLogsJobId] = useState<string | null>(null);
+  const [editingJob, setEditingJob] = useState<Job | null>(null);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -98,6 +103,36 @@ export default function DashboardPage() {
   const closeLogs = () => {
     setSelectedJobLogs(null);
     setLogsJobId(null);
+  };
+
+  const handleEditJob = (job: Job) => {
+    setEditingJob(job);
+    setIsEditModalOpen(true);
+  };
+
+  const handleEditSuccess = () => {
+    fetchJobs(); // Refresh jobs list
+  };
+
+  const handleRerunJob = async (jobId: string) => {
+    if (!confirm("Are you sure you want to restart this monitoring job?")) {
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/restart`, {
+        method: "POST",
+      });
+
+      if (res.ok) {
+        fetchJobs(); // Refresh to show updated status
+      } else {
+        alert("Failed to restart job");
+      }
+    } catch (error) {
+      console.error("Error restarting job:", error);
+      alert("Error restarting job");
+    }
   };
 
   if (status === "loading" || loading) {
@@ -178,7 +213,9 @@ export default function DashboardPage() {
                 />
               </svg>
             </div>
-            <h3 className="text-xl font-semibold text-gray-900 mb-2">No Monitoring Jobs Yet</h3>
+            <h3 className="text-xl font-semibold text-gray-900 mb-2">
+              No Monitoring Jobs Yet
+            </h3>
             <p className="text-gray-600 mb-6">
               Create your first job to start monitoring for earlier visa appointments
             </p>
@@ -240,22 +277,38 @@ export default function DashboardPage() {
 
                 {job.lastMessage && (
                   <div className="mb-4 p-3 bg-gray-50 rounded text-sm">
-                    <p className="text-gray-700">{job.lastMessage.substring(0, 200)}...</p>
+                    <p className="text-gray-700">
+                      {job.lastMessage.substring(0, 200)}...
+                    </p>
                   </div>
                 )}
 
-                <div className="flex gap-3">
+                <div className="flex gap-2 flex-wrap">
+                  <button
+                    onClick={() => handleEditJob(job)}
+                    className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium text-sm"
+                  >
+                    ✏️ Edit
+                  </button>
+                  <button
+                    onClick={() => handleRerunJob(job.id)}
+                    disabled={job.status === "active"}
+                    className="px-4 py-2 border border-green-300 text-green-700 rounded-lg hover:bg-green-50 font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    title={job.status === "active" ? "Job is already running" : "Restart this job"}
+                  >
+                    ▶️ Re-run
+                  </button>
                   <button
                     onClick={() => handleViewLogs(job.id)}
-                    className="px-4 py-2 border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50 font-medium"
+                    className="px-4 py-2 border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50 font-medium text-sm"
                   >
-                    View Logs
+                    📄 Logs
                   </button>
                   <button
                     onClick={() => handleDeleteJob(job.id)}
-                    className="px-4 py-2 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 font-medium"
+                    className="px-4 py-2 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 font-medium text-sm"
                   >
-                    Delete
+                    🗑️ Delete
                   </button>
                 </div>
               </div>
@@ -271,29 +324,34 @@ export default function DashboardPage() {
             {/* Modal Header */}
             <div className="flex justify-between items-center p-6 border-b">
               <h3 className="text-xl font-semibold text-gray-900">
-                Job Logs - {jobs.find(j => j.id === logsJobId)?.scheduleId}
+                Job Logs - {jobs.find((j) => j.id === logsJobId)?.scheduleId}
               </h3>
-              <button
-                onClick={closeLogs}
-                className="text-gray-400 hover:text-gray-600"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              <button onClick={closeLogs} className="text-gray-400 hover:text-gray-600">
+                <svg
+                  className="w-6 h-6"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
                 </svg>
               </button>
             </div>
 
             {/* Modal Content */}
-            <div className="flex-1 overflow-auto p-6">
+            <div className="flex-1 overflow-hidden p-6">
               {logsLoading ? (
                 <div className="flex items-center justify-center py-12">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
                   <span className="ml-3 text-gray-600">Loading logs...</span>
                 </div>
               ) : (
-                <pre className="bg-gray-900 text-green-400 p-4 rounded-lg text-xs overflow-x-auto font-mono whitespace-pre-wrap">
-                  {selectedJobLogs || "No logs available"}
-                </pre>
+                <LogViewer logs={selectedJobLogs || "No logs available yet"} />
               )}
             </div>
 
@@ -316,6 +374,17 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
+
+      {/* Edit Job Modal */}
+      <EditJobModal
+        job={editingJob}
+        isOpen={isEditModalOpen}
+        onClose={() => {
+          setIsEditModalOpen(false);
+          setEditingJob(null);
+        }}
+        onSuccess={handleEditSuccess}
+      />
     </div>
   );
 }
